@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gladly-jupyter"
-version = "0.1.0"
+version = "0.0.1"
 description = "Jupyter widget for Gladly GPU-accelerated plotting"
 requires-python = ">=3.8"
 dependencies = [
