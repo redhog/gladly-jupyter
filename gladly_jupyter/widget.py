@@ -1,13 +1,14 @@
-import pathlib
 import uuid
 
 import anywidget
 import traitlets
+import pathlib
 
-from . import server_extension
+from . import kernel_server
 from .pint_support import get_quantity_kind, to_float32
 
 _ESM_PATH = pathlib.Path(__file__).parent / "static" / "widget.js"
+
 
 
 class DataGroup:
@@ -51,7 +52,7 @@ class Plot(anywidget.AnyWidget):
 
     _widget_type = traitlets.Unicode("plot").tag(sync=True)
     _widget_id = traitlets.Unicode("").tag(sync=True)
-    _server_base_url = traitlets.Unicode("/").tag(sync=True)
+    _kernel_port = traitlets.Int(0).tag(sync=True)
     _meta = traitlets.Dict({}).tag(sync=True)
     _is_group = traitlets.Bool(False).tag(sync=True)
     layers = traitlets.List([]).tag(sync=True)
@@ -60,7 +61,7 @@ class Plot(anywidget.AnyWidget):
     def __init__(self, data, layers=None, axes=None, quantity_kinds=None, **kwargs):
         super().__init__(**kwargs)
         self._widget_id = str(uuid.uuid4())
-        self._server_base_url = server_extension.get_base_url()
+        self._kernel_port = kernel_server.get_port()
         self.layers = layers or []
         self.axes = axes or {}
         self._load_data(data, quantity_kinds)
@@ -72,39 +73,37 @@ class Plot(anywidget.AnyWidget):
             self._is_group = True
             meta = {}
             for name, df in data.frames.items():
-                # Merge: DataGroup-level quantity_kinds win over top-level
                 qk = {**(quantity_kinds or {}).get(name, {}), **data.quantity_kinds.get(name, {})}
                 columns, df_meta = _process_df(df, qk or None)
                 meta[name] = df_meta
                 for col_name, arr in columns.items():
-                    server_extension.register(wid, f"{name}/{col_name}", arr)
+                    kernel_server.register(wid, f"{name}/{col_name}", arr)
             self._meta = meta
         else:
             self._is_group = False
             columns, meta = _process_df(data, quantity_kinds)
             for col_name, arr in columns.items():
-                server_extension.register(wid, col_name, arr)
+                kernel_server.register(wid, col_name, arr)
             self._meta = meta
 
     def __del__(self):
-        server_extension.unregister(self._widget_id)
+        kernel_server.unregister(self._widget_id)
 
 
 class PlotGroup(anywidget.AnyWidget):
     _esm = _ESM_PATH
 
     _widget_type = traitlets.Unicode("plotgroup").tag(sync=True)
-    _server_base_url = traitlets.Unicode("/").tag(sync=True)
     _plot_configs = traitlets.List([]).tag(sync=True)
     _auto_link = traitlets.Bool(True).tag(sync=True)
 
     def __init__(self, plots, auto_link=True, **kwargs):
         super().__init__(**kwargs)
-        self._server_base_url = server_extension.get_base_url()
         self._auto_link = auto_link
         self._plot_configs = [
             {
                 "widget_id": p._widget_id,
+                "kernel_port": p._kernel_port,
                 "meta": p._meta,
                 "is_group": p._is_group,
                 "layers": p.layers,

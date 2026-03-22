@@ -53,6 +53,10 @@ jupyter server extension list
 
 ## Usage
 
+### Column naming
+
+Gladly always organises data in named groups. A single DataFrame is automatically placed in a group called `input`, so its columns are referenced as `"input.colname"` in layer specs. For a `DataGroup`, you use the name you gave each DataFrame: `"raw.colname"`.
+
 ### Single DataFrame
 
 ```python
@@ -65,7 +69,7 @@ df = pd.DataFrame({"time": t, "signal": np.sin(t)})
 
 gl.Plot(
     df,
-    layers=[{"points": {"xData": "time", "yData": "signal"}}],
+    layers=[{"points": {"xData": "input.time", "yData": "input.signal"}}],
     axes={
         "xaxis_bottom": {"label": "Time (s)"},
         "yaxis_left":   {"label": "Signal"},
@@ -80,7 +84,7 @@ Quantity kinds drive axis auto-linking in `PlotGroup`. If not specified they fal
 ```python
 gl.Plot(
     df,
-    layers=[{"points": {"xData": "time", "yData": "voltage"}}],
+    layers=[{"points": {"xData": "input.time", "yData": "input.voltage"}}],
     quantity_kinds={"time": "time", "voltage": "mV"},
 )
 ```
@@ -94,7 +98,7 @@ import pint_pandas
 df["time"]    = df["time"].astype("pint[s]")
 df["voltage"] = df["voltage"].astype("pint[mV]")
 
-gl.Plot(df, layers=[{"points": {"xData": "time", "yData": "voltage"}}])
+gl.Plot(df, layers=[{"points": {"xData": "input.time", "yData": "input.voltage"}}])
 # quantity kinds inferred as "s" and "mV" — no extra config needed
 ```
 
@@ -131,8 +135,8 @@ gl.DataGroup(
 Plots whose axes share the same quantity kind are automatically linked when `auto_link=True` (the default). With Pint columns, this happens without any extra configuration:
 
 ```python
-p1 = gl.Plot(df1, layers=[{"points": {"xData": "time", "yData": "depth"}}])
-p2 = gl.Plot(df2, layers=[{"points": {"xData": "time", "yData": "velocity"}}])
+p1 = gl.Plot(df1, layers=[{"points": {"xData": "input.time", "yData": "input.depth"}}])
+p2 = gl.Plot(df2, layers=[{"points": {"xData": "input.time", "yData": "input.velocity"}}])
 
 gl.PlotGroup([p1, p2])          # time axes linked automatically
 ```

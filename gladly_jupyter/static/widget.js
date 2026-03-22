@@ -1,38 +1,45 @@
-import {
-  Plot as GladlyPlot,
-  PlotGroup as GladlyPlotGroup,
-  registerAxisQuantityKind,
-} from 'https://redhog.github.io/gladly/dist/gladly.esm.js';
+const GLADLY_URL = 'https://redhog.github.io/gladly/dist/gladly.iife.min.js';
+
+// Load once, cache the promise so concurrent widgets don't create multiple script tags.
+let _gladlyPromise = null;
+
+function loadGladly() {
+  if (_gladlyPromise) return _gladlyPromise;
+  _gladlyPromise = new Promise((resolve, reject) => {
+    if (globalThis.Gladly) {
+      resolve(globalThis.Gladly);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = GLADLY_URL;
+    script.onload = () => resolve(globalThis.Gladly);
+    script.onerror = () => reject(new Error(`gladly-jupyter: failed to load ${GLADLY_URL}`));
+    document.head.appendChild(script);
+  });
+  return _gladlyPromise;
+}
 
 // ─── Data fetching ────────────────────────────────────────────────────────────
 
-async function fetchColumn(baseUrl, widgetId, path) {
-  const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-  const url = `${base}/gladly/data/${encodeURIComponent(widgetId)}/${path}`;
+function kernelUrl(port, widgetId, path) {
+  // Kernel HTTP server runs on a random port on the same host as the notebook.
+  return `http://${window.location.hostname}:${port}/gladly/data/${encodeURIComponent(widgetId)}/${path}`;
+}
+
+async function fetchColumn(port, widgetId, path) {
+  const url = kernelUrl(port, widgetId, path);
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`gladly-jupyter: fetch ${url} → ${resp.status}`);
   return new Float32Array(await resp.arrayBuffer());
 }
 
-/**
- * Fetch all columns for one plot's data and return a raw data object
- * suitable for passing directly to GladlyPlot.update({ data }).
- *
- * Single DataFrame meta:  { colName: { length, quantityKind, min, max } }
- * DataGroup meta:         { dataName: { colName: { ... } } }
- *
- * Output follows Gladly's columnar format:
- *   { data: { col: Float32Array }, quantity_kinds: { col: qk }, domains: { col: [min, max] } }
- * or for DataGroup:
- *   { dataName: { data: {...}, quantity_kinds: {...}, domains: {...} } }
- */
-async function buildRawData(baseUrl, widgetId, meta, isGroup) {
+async function buildRawData(port, widgetId, meta, isGroup) {
   if (isGroup) {
     const result = {};
     for (const [dataName, cols] of Object.entries(meta)) {
       const arrays = {}, quantityKinds = {}, domains = {};
       for (const [colName, info] of Object.entries(cols)) {
-        arrays[colName] = await fetchColumn(baseUrl, widgetId, `${dataName}/${colName}`);
+        arrays[colName] = await fetchColumn(port, widgetId, `${dataName}/${colName}`);
         quantityKinds[colName] = info.quantityKind;
         domains[colName] = [info.min, info.max];
       }
@@ -42,7 +49,7 @@ async function buildRawData(baseUrl, widgetId, meta, isGroup) {
   } else {
     const arrays = {}, quantityKinds = {}, domains = {};
     for (const [colName, info] of Object.entries(meta)) {
-      arrays[colName] = await fetchColumn(baseUrl, widgetId, colName);
+      arrays[colName] = await fetchColumn(port, widgetId, colName);
       quantityKinds[colName] = info.quantityKind;
       domains[colName] = [info.min, info.max];
     }
@@ -52,12 +59,7 @@ async function buildRawData(baseUrl, widgetId, meta, isGroup) {
 
 // ─── Quantity kind registration ───────────────────────────────────────────────
 
-/**
- * Register all quantity kinds from a meta object so Gladly knows about them.
- * Unregistered QKs already work (they default to label=name, scale=linear),
- * but explicit registration lets PlotGroup auto-link axes that share a QK.
- */
-function registerQKsFromMeta(meta, isGroup) {
+function registerQKsFromMeta(registerAxisQuantityKind, meta, isGroup) {
   const qks = new Set();
   if (isGroup) {
     for (const cols of Object.values(meta)) {
@@ -83,47 +85,46 @@ function makePlotContainer(parent) {
 // ─── Render ───────────────────────────────────────────────────────────────────
 
 export async function render({ model, el }) {
+  const { Plot: GladlyPlot, PlotGroup: GladlyPlotGroup, registerAxisQuantityKind } = await loadGladly();
+
   el.style.cssText = 'width:100%;display:block;';
 
-  const widgetType = model.get('_widget_type');
-
-  if (widgetType === 'plotgroup') {
-    return await renderPlotGroup(model, el);
+  if (model.get('_widget_type') === 'plotgroup') {
+    return await renderPlotGroup(model, el, GladlyPlot, GladlyPlotGroup, registerAxisQuantityKind);
   } else {
-    return await renderPlot(model, el);
+    return await renderPlot(model, el, GladlyPlot, registerAxisQuantityKind);
   }
 }
 
-async function renderPlot(model, el) {
+async function renderPlot(model, el, GladlyPlot, registerAxisQuantityKind) {
   const widgetId = model.get('_widget_id');
+  const port = model.get('_kernel_port');
   const meta = model.get('_meta');
   const isGroup = model.get('_is_group');
   const layers = model.get('layers');
   const axes = model.get('axes');
-  const baseUrl = model.get('_server_base_url');
 
-  registerQKsFromMeta(meta, isGroup);
+  registerQKsFromMeta(registerAxisQuantityKind, meta, isGroup);
 
   const container = makePlotContainer(el);
-  const rawData = await buildRawData(baseUrl, widgetId, meta, isGroup);
+  const rawData = await buildRawData(port, widgetId, meta, isGroup);
   const plot = new GladlyPlot(container, {});
   await plot.update({ config: { layers, axes }, data: rawData });
 }
 
-async function renderPlotGroup(model, el) {
+async function renderPlotGroup(model, el, GladlyPlot, GladlyPlotGroup, registerAxisQuantityKind) {
   const plotConfigs = model.get('_plot_configs');
   const autoLink = model.get('_auto_link');
-  const baseUrl = model.get('_server_base_url');
 
   const namedPlots = {};
 
   for (let i = 0; i < plotConfigs.length; i++) {
-    const { widget_id, meta, is_group, layers, axes } = plotConfigs[i];
+    const { widget_id, kernel_port, meta, is_group, layers, axes } = plotConfigs[i];
 
-    registerQKsFromMeta(meta, is_group);
+    registerQKsFromMeta(registerAxisQuantityKind, meta, is_group);
 
     const container = makePlotContainer(el);
-    const rawData = await buildRawData(baseUrl, widget_id, meta, is_group);
+    const rawData = await buildRawData(kernel_port, widget_id, meta, is_group);
     const plot = new GladlyPlot(container, {});
     await plot.update({ config: { layers, axes }, data: rawData });
     namedPlots[String(i)] = plot;
