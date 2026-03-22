@@ -1,10 +1,8 @@
 # gladly-jupyter
 
-Jupyter widget for [Gladly](https://github.com/redhog/gladly) — GPU-accelerated plotting via WebGL.
+Jupyter widget for [Gladly](https://github.com/redhog/gladly) — GPU-accelerated plotting via WebGL, driven directly from Python.
 
-Renders `Plot`, `DataGroup`, and `PlotGroup` directly from pandas DataFrames in Jupyter notebooks. Large columns (gigabytes) are streamed to the browser over HTTP rather than sent through the Jupyter comm, so there is no practical size limit.
-
-Gladly itself is loaded from CDN — no JavaScript build step is required.
+Large columns (gigabytes) are streamed to the browser over HTTP from kernel memory rather than sent through the Jupyter comm, so there is no practical data-size limit. Gladly itself is loaded from CDN — no JavaScript build step is required.
 
 ## Requirements
 
@@ -14,134 +12,103 @@ Gladly itself is loaded from CDN — no JavaScript build step is required.
 
 ## Installation
 
-### From PyPI
-
 ```bash
 pip install gladly-jupyter
-```
-
-### From source
-
-```bash
-pip install ./gladly_jupyter   # from the repo root, where gladly_jupyter/ lives
-```
-
-Or, from inside the package directory:
-
-```bash
-cd gladly_jupyter
-pip install .
-```
-
-### With optional Pint support
-
-[pint](https://pint.readthedocs.io) and [pint-pandas](https://pint-pandas.readthedocs.io) allow quantity kinds to be inferred automatically from physical units attached to DataFrame columns:
-
-```bash
+# with optional Pint unit support:
 pip install "gladly-jupyter[pint]"
-# or from source:
-pip install "./gladly_jupyter[pint]"
 ```
 
+From source:
+```bash
+pip install ./gladly_jupyter
+```
 
-## Usage
-
-### Column naming
-
-Gladly always organises data in named groups. A single DataFrame is automatically placed in a group called `input`, so its columns are referenced as `"input.colname"` in layer specs. For a `DataGroup`, you use the name you gave each DataFrame: `"raw.colname"`.
-
-### Single DataFrame
+## Quick example
 
 ```python
 import gladly_jupyter as gl
 import pandas as pd
 import numpy as np
 
-t = np.linspace(0, 10, 100_000, dtype="float32")
+t  = np.linspace(0, 10, 100_000, dtype="float32")
 df = pd.DataFrame({"time": t, "signal": np.sin(t)})
 
-gl.Plot(
-    df,
-    layers=[{"points": {"xData": "input.time", "yData": "input.signal"}}],
-    axes={
+config = {
+    "layers": [{"points": {"xData": "input.time", "yData": "input.signal"}}],
+    "axes":   {
         "xaxis_bottom": {"label": "Time (s)"},
         "yaxis_left":   {"label": "Signal"},
     },
-)
+}
+
+gl.Plot(config, df)
 ```
 
-### Explicit quantity kinds
+A single DataFrame is automatically wrapped and placed under the key `input`, so its columns are referenced as `"input.colname"` in the config. For a `DataGroup` you use the name you assigned each source: `"raw.colname"`.
 
-Quantity kinds drive axis auto-linking in `PlotGroup`. If not specified they fall back to the column name.
-
-```python
-gl.Plot(
-    df,
-    layers=[{"points": {"xData": "input.time", "yData": "input.voltage"}}],
-    quantity_kinds={"time": "time", "voltage": "mV"},
-)
-```
-
-### Pint-aware DataFrames
-
-When `pint-pandas` is installed, units are picked up automatically — the unit string (`"s"`, `"mV"`, …) becomes the quantity kind:
+## Multiple data sources in one plot
 
 ```python
-import pint_pandas
-df["time"]    = df["time"].astype("pint[s]")
-df["voltage"] = df["voltage"].astype("pint[mV]")
-
-gl.Plot(df, layers=[{"points": {"xData": "input.time", "yData": "input.voltage"}}])
-# quantity kinds inferred as "s" and "mV" — no extra config needed
-```
-
-### DataGroup — multiple DataFrames in one plot
-
-Column names in layer specs use Gladly's dot notation (`"name.column"`):
-
-```python
-dg = gl.DataGroup({"raw": df_raw, "filtered": df_filtered})
-
-gl.Plot(
-    dg,
-    layers=[
+config = {
+    "layers": [
         {"points": {"xData": "raw.time",      "yData": "raw.signal"}},
         {"points": {"xData": "filtered.time", "yData": "filtered.signal"}},
     ],
-)
+}
+
+gl.Plot(config, gl.DataGroup({"raw": df_raw, "filtered": df_filtered}))
 ```
 
-Per-group quantity kinds:
+## Linked axes across multiple plots
 
 ```python
-gl.DataGroup(
-    {"raw": df_raw, "filtered": df_filtered},
-    quantity_kinds={
-        "raw":      {"time": "s", "signal": "mV"},
-        "filtered": {"time": "s", "signal": "mV"},
-    },
-)
+p1 = gl.Plot({"layers": [{"points": {"xData": "input.time", "yData": "input.depth"}}]},
+             gl.Data(df1, quantity_kinds={"time": "s"}))
+
+p2 = gl.Plot({"layers": [{"points": {"xData": "input.time", "yData": "input.velocity"}}]},
+             gl.Data(df2, quantity_kinds={"time": "s"}))
+
+gl.PlotGroup({"depth": p1, "velocity": p2})   # time axes auto-linked
 ```
 
-### PlotGroup — linked axes across multiple plots
-
-Plots whose axes share the same quantity kind are automatically linked when `auto_link=True` (the default). With Pint columns, this happens without any extra configuration:
+Manual axis linking (cross-plot, no PlotGroup required):
 
 ```python
-p1 = gl.Plot(df1, layers=[{"points": {"xData": "input.time", "yData": "input.depth"}}])
-p2 = gl.Plot(df2, layers=[{"points": {"xData": "input.time", "yData": "input.velocity"}}])
-
-gl.PlotGroup([p1, p2])          # time axes linked automatically
+link = gl.link_axes(p1.axis.xaxis_bottom, p2.axis.xaxis_bottom)
+link.unlink()   # tear down later
 ```
 
-Disable auto-linking to manage links manually:
+## Registering quantity kinds and layer types
 
 ```python
-gl.PlotGroup([p1, p2], auto_link=False)
+# Register before creating plots — picked up at construction time
+gl.register_axis_quantity_kind("frequency", label="Frequency (Hz)", scale="log")
+
+gl.register_layer_type("myLayer", {
+    "vertShader": "attribute vec2 a_position; void main() { ... }",
+    "fragShader": "void main() { gl_FragColor = vec4(1.0); }",
+    "schema":     gl.js("(data) => ({ type: 'object', properties: {} })"),
+})
 ```
 
-## How it works
+## Live config and schema
 
-- **Data transport**: the widget starts a lightweight Tornado HTTP server inside the kernel process on a random port. Columns are served as raw `float32` binary directly from kernel memory, with `Range` header support. Data never passes through the Jupyter comm WebSocket and the Jupyter server process is not involved.
-- **Quantity kinds**: resolved per column as: explicit `quantity_kinds` dict → Pint unit string → column name. The same string is registered in Gladly's `AxisQuantityKindRegistry`, enabling `PlotGroup` axis auto-linking.
-- **Rendering**: Gladly is loaded from `https://redhog.github.io/gladly/dist/gladly.esm.js`. No local JS build is needed.
+```python
+config = plot.get_config()   # includes current zoom domains, blocks until JS responds
+schema = plot.schema()       # JSON Schema for the config dict
+
+# Async variants:
+config = await plot.async_get_config()
+schema = await plot.async_schema()
+```
+
+## Documentation
+
+Full API reference in [`docs/`](docs/):
+
+- [Data — Data, DataGroup, auto-wrapping](docs/Data.md)
+- [Plot — constructor, update, config, schema](docs/Plot.md)
+- [PlotGroup — multi-plot containers](docs/PlotGroup.md)
+- [Axis linking — link_axes, Axis proxy](docs/Linking.md)
+- [Registries — quantity kinds, layer types](docs/Registries.md)
+- [Architecture — internals](docs/Architecture.md)

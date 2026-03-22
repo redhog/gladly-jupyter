@@ -31,4 +31,4 @@ def to_float32(series):
     except ImportError:
         pass
 
-    return np.asarray(series.values, dtype=np.float32)
+    return np.asarray(series.values if hasattr(series, 'values') else series, dtype=np.float32)
