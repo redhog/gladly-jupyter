@@ -11,17 +11,10 @@ dependencies = [
     "anywidget>=0.9.0",
     "numpy",
     "pandas",
-    "jupyter_server>=2.0.0",
 ]
 
 [project.optional-dependencies]
 pint = ["pint", "pint-pandas"]
 
-[project.entry-points."jupyter_server.extension_module"]
-gladly_jupyter = "gladly_jupyter"
-
 [tool.hatch.build.targets.wheel]
 packages = ["gladly_jupyter"]
-
-[tool.hatch.build.targets.wheel.shared-data]
-"jupyter-config" = "etc/jupyter"

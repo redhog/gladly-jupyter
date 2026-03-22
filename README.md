@@ -9,7 +9,7 @@ Gladly itself is loaded from CDN — no JavaScript build step is required.
 ## Requirements
 
 - Python ≥ 3.8
-- JupyterLab ≥ 4 or Jupyter Notebook ≥ 7 (both use `jupyter_server` ≥ 2)
+- JupyterLab ≥ 4 or Jupyter Notebook ≥ 7
 - A WebGL-capable browser
 
 ## Installation
@@ -43,13 +43,6 @@ pip install "gladly-jupyter[pint]"
 pip install "./gladly_jupyter[pint]"
 ```
 
-### Verifying the server extension
-
-The server extension is enabled automatically when the package is installed — no manual enable step is needed. To confirm it is active:
-
-```bash
-jupyter server extension list
-```
 
 ## Usage
 
@@ -149,6 +142,6 @@ gl.PlotGroup([p1, p2], auto_link=False)
 
 ## How it works
 
-- **Data transport**: columns are served as raw `float32` binary over HTTP from a Jupyter server extension (`/gladly/data/<widget-id>/<column-path>`), with `Range` header support. Data never passes through the Jupyter comm WebSocket.
+- **Data transport**: the widget starts a lightweight Tornado HTTP server inside the kernel process on a random port. Columns are served as raw `float32` binary directly from kernel memory, with `Range` header support. Data never passes through the Jupyter comm WebSocket and the Jupyter server process is not involved.
 - **Quantity kinds**: resolved per column as: explicit `quantity_kinds` dict → Pint unit string → column name. The same string is registered in Gladly's `AxisQuantityKindRegistry`, enabling `PlotGroup` axis auto-linking.
 - **Rendering**: Gladly is loaded from `https://redhog.github.io/gladly/dist/gladly.esm.js`. No local JS build is needed.
