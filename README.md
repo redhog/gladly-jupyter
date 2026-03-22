@@ -43,17 +43,9 @@ pip install "gladly-jupyter[pint]"
 pip install "./gladly_jupyter[pint]"
 ```
 
-### Enabling the server extension
+### Verifying the server extension
 
-The Jupyter server extension is registered automatically via a `jupyter_server.extension_module` entry point when the package is installed with pip. It should be active the next time you start JupyterLab or Jupyter Notebook.
-
-If you need to enable it explicitly (e.g. in a managed environment):
-
-```bash
-jupyter server extension enable gladly_jupyter
-```
-
-Verify it is active:
+The server extension is enabled automatically when the package is installed — no manual enable step is needed. To confirm it is active:
 
 ```bash
 jupyter server extension list
